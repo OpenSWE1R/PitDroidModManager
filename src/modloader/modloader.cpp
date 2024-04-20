@@ -35,7 +35,7 @@ int md5Match(uint8_t* reference, uint8_t* candidate)
 
 int main(int argc, char** argv)
 {
-    LPCSTR lpcstrDll = "swr_modloader_core.dll";
+    LPCSTR lpcstrDll = "core.dll";
     LPCSTR targetPath = "SWEP1RCR.EXE";
     SIZE_T nLength;
     LPVOID lpLoadLibraryA = NULL;

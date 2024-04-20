@@ -29,7 +29,7 @@ bool CreateConsoleWindow()
     char NPath[MAX_PATH];
     GetCurrentDirectoryA(MAX_PATH, NPath);
 
-    printf("DLL Loaded at %s\n", NPath);
+    printf("Core DLL Loaded at %s\n", NPath);
     printf("PID is %ld\n", GetCurrentProcessId());
     if (g_config.developperMode)
     {
@@ -203,6 +203,70 @@ int applyPatches()
     return 0;
 }
 
+void hookInit(void)
+{
+    DWORD old;
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, PAGE_EXECUTE_READWRITE, &old);
+    // WinMain @ 0x004238d0
+
+    // String locations are in padding unused space in .data
+    unsigned char* CORECSTR_ADDR = (unsigned char*)0x004b7e44;
+    unsigned char* INITCSTR_ADDR = (unsigned char*)0x004b7ecf;
+    unsigned char* WINMAIN_ADDR = (unsigned char*)0x004238d0;
+
+    unsigned char core[5] = { 'c', 'o', 'r', 'e', 0 };
+    unsigned char init[5] = { 'i', 'n', 'i', 't', 0 };
+
+    WriteBytes(CORECSTR_ADDR, core, 5);
+    WriteBytes(INITCSTR_ADDR, init, 5);
+
+    // Improved for init(HINSTANCE hInstance, PSTR pCmdLine, int nCmdShow);
+    unsigned char init_hook_code[] = {
+        0x68, 0x44, 0x7e, 0x4b, 0x00, // push CORECSTR_ADDR
+        0xff, 0x15, 0x8c, 0xc0, 0x4a, 0x00, // call NEAR absolute GetModuleHandleA(CORECTSTR_ADDR);
+        0x68, 0xcf, 0x7e, 0x4b, 0x00, // push INITCSTR_ADDR
+        0x50, // push eax
+        0xff, 0x15, 0x78, 0xc1, 0x4a, 0x00, // call GetProcAddress(Handle, INITCSTR_ADDR);
+        0xff, 0xe0, // jmp eax init(hInstance, hPrevInstance, pCmdLine, nCmdShow);
+        0x83, 0xc4, 0x10, // add ESP, 0x10
+        0x33, 0xc0, // xor eax, eax
+        0xc2, 0x10, 0x00 // ret 0x10
+    };
+    WriteBytes(WINMAIN_ADDR, init_hook_code, sizeof(init_hook_code));
+
+    // The shell code without the C syntax:
+    /*
+        68 44 7e 4b 00
+        ff 15 8c c0 4a 00
+        68 cf 7e 4b 00
+        50
+        ff 15 78 c1 4a 00
+        ff e0
+        83 c4 10
+        33 c0
+        c2 10 00
+    */
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, NULL);
+}
+
+extern "C"
+{
+    __declspec(dllexport) void init(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow)
+    {
+        printf("Init called inside core dll ! Hooked successfuly.\n");
+        int i = 0;
+        Sleep(2000);
+        printf("Waiting in init %d\n", i);
+
+        // TODO: Real hooks here
+        // applyPatches();
+
+        // Call original main
+        int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, char*))0x0049cd40;
+        Window_Main(hInstance, NULL, pCmdLine, nCmdShow, "Modded game window");
+    }
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     (void)hModule;
@@ -212,13 +276,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
     case DLL_PROCESS_ATTACH: {
         parseConfig();
-        printConfig();
         if (!CreateConsoleWindow())
         {
             printf("PitDroidModManager dll console exists\n");
         }
+        printConfig();
 
-        applyPatches();
+        hookInit();
         break;
     }
 

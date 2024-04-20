@@ -21,7 +21,7 @@ class colors:
 THISDIR = os.getcwd()
 THISPYTHON = "python" + sys.version[0:4]
 
-SOURCES_LOADER = [os.path.join(THISDIR, "src", "loader.cpp"), os.path.join(THISDIR, "src", "md5.c")]
+SOURCES_LOADER = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join(THISDIR, "src", "modloader", "md5.c")]
 FLAGS_LOADER = ["-g", "-Wall", "-Wextra", "-pedantic"]
 
 INCLUDES = ["-I.", "-Isrc"]
@@ -97,7 +97,7 @@ def main(args):
         sys.exit(1)
 
     if args.modloader:
-        _, err, status = run(["g++", os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join("src", "modloader", "md5.c"), "-Isrc", "-o", os.path.join("build", "PitDroidModManager")] + FLAGS)
+        _, err, status = run(["g++"] + SOURCES_LOADER + ["-Isrc", "-o", os.path.join("build", "PitDroidModManager")] + FLAGS_LOADER)
         if (status != 0):
             printerr(err)
 
@@ -123,10 +123,10 @@ def main(args):
     if (failed):
         printerr("Some object file compilation failed. Aborting now")
         sys.exit(1)
-    elif (runLogged(["g++"] + OBJS + ["-o", os.path.join(THISDIR, "build", "PitDroidModManager_core.dll")] + FLAGS + INCLUDES + LIBS) != 0):
+    elif (runLogged(["g++"] + OBJS + ["-o", os.path.join(THISDIR, "build", "core.dll")] + FLAGS + INCLUDES + LIBS) != 0):
         sys.exit(1)
 
-    shutil.copyfile(os.path.join(THISDIR, "config", "PitDroidModManager_coreConfig.txt"), os.path.join(THISDIR, "build", "PitDroidModManager_coreConfig.txt"))
+    shutil.copyfile(os.path.join(THISDIR, "config", "coreConfig.txt"), os.path.join(THISDIR, "build", "coreConfig.txt"))
 
     print(f"{colors.OKGREEN}Compilation successful ! Outputs are in build/{colors.ENDC}")
     return
