@@ -1,24 +1,50 @@
+
 #include <stdio.h>
 
+// g++ -c src\dllmain.cpp -o dllmain.o -s -shared -Iraylib\include -lgdi32 -lcomctl32 -lole32 -lwinmm
+#define NODRAWTEXT // Collision with raylib
 #include <windows.h>
+#include <winuser.h>
 #include <process.h>
 #include <tlhelp32.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <vector>
+#include <string>
+#include <cstring>
+#include <memory>
+#include <bitset>
 
 #include "config.h"
 
+namespace rl
+{
+#include "raylib.h"
+}
+
 #ifdef WIN32
 
-HWND g_ConsoleWindow = NULL;
+#define SWR_SECTION_TEXT_BEGIN (0x00401000)
+#define SWR_SECTION_RSRC_BEGIN (0x00ece000)
+
+typedef struct ChangeItem
+{
+    std::string modName;
+    unsigned char* position;
+    std::unique_ptr<unsigned char[]> oldBytes;
+} ChangeItem;
+
+std::vector<ChangeItem> g_changes;
+std::bitset<SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN> collisionsMask;
+const std::string modName("core");
 
 bool CreateConsoleWindow()
 {
     if (!AllocConsole())
         return false;
 
-    g_ConsoleWindow = GetConsoleWindow();
-    if (g_ConsoleWindow == NULL)
+    HWND ConsoleWindow = GetConsoleWindow();
+    if (ConsoleWindow == nullptr)
         return false;
 
     freopen_s((FILE**)stdin, "CONIN$", "r", stdin);
@@ -26,6 +52,7 @@ bool CreateConsoleWindow()
     freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
 
     SetConsoleTitleA("SWR CE Debug Console");
+
     char NPath[MAX_PATH];
     GetCurrentDirectoryA(MAX_PATH, NPath);
 
@@ -50,7 +77,7 @@ void PrintMemory(unsigned char* at, size_t nbBytes)
     printf("\n");
 }
 
-void WriteBytes(unsigned char* at, unsigned char* code, size_t nbBytes)
+void WriteBytes(unsigned char* at, unsigned char* code, unsigned char* oldBytes, size_t nbBytes)
 {
     if (g_config.developperMode)
     {
@@ -59,10 +86,14 @@ void WriteBytes(unsigned char* at, unsigned char* code, size_t nbBytes)
     }
     for (size_t i = 0; i < nbBytes; i++)
     {
-        *at = *code;
-        at += 1;
-        code += 1;
+        if (oldBytes != nullptr)
+        {
+            oldBytes[i] = *at;
+        }
+
+        at[i] = code[i];
     }
+
     if (g_config.developperMode)
     {
         printf(">>>>\n");
@@ -71,8 +102,38 @@ void WriteBytes(unsigned char* at, unsigned char* code, size_t nbBytes)
     }
 }
 
-#define SWR_SECTION_TEXT_BEGIN (0x00401000)
-#define SWR_SECTION_RSRC_BEGIN (0x00ece000)
+bool WriteBytesChecked(std::string modName, unsigned char* at, unsigned char* code, size_t nbBytes)
+{
+    for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
+    {
+        if (collisionsMask.test(i))
+        {
+            printf("WARNING: Detected Write Collision at 0x%08X! Mod %s cannot write at %p!\n", i, modName.c_str(), at);
+            return false;
+        }
+    }
+
+    auto oldBytes = std::make_unique<unsigned char[]>(nbBytes);
+
+    WriteBytes(at, code, oldBytes.get(), nbBytes);
+    for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
+    {
+        collisionsMask.set(i);
+    }
+
+    g_changes.emplace_back(ChangeItem{
+        modName,
+        at,
+        std::move(oldBytes),
+    });
+
+    return true;
+}
+
+void UndoAllWritesForMod(std::string modName)
+{
+    // TODO
+}
 
 #define NOP (0x90)
 
@@ -80,8 +141,8 @@ void patchAssetBuffer()
 {
     unsigned char* ASSETBUFFERMALLOCSIZE_ADDR = (unsigned char*)0x00449042;
     unsigned char* ASSETBUFFERENDOFFSET_ADDR = (unsigned char*)0x0044904d;
-    WriteBytes(ASSETBUFFERMALLOCSIZE_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
-    WriteBytes(ASSETBUFFERENDOFFSET_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
+    WriteBytesChecked(modName, ASSETBUFFERMALLOCSIZE_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
+    WriteBytesChecked(modName, ASSETBUFFERENDOFFSET_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
 }
 
 void patchWindowFlag()
@@ -90,7 +151,7 @@ void patchWindowFlag()
     if (g_config.changeWindowFlags)
     {
         unsigned char pushNewFlags[] = { 0x68, 0x00, 0x00, 0x04, 0x90 }; // PUSH imm32 WS_SIZEBOX | WS_VISIBLE | WS_POPUP
-        WriteBytes(CHANGEWINDOWFLAG_ADDR, pushNewFlags, sizeof(pushNewFlags));
+        WriteBytesChecked(modName, CHANGEWINDOWFLAG_ADDR, pushNewFlags, sizeof(pushNewFlags));
     }
 }
 
@@ -109,13 +170,13 @@ void patchFOV()
     // MOV ECX, 0x3f800000 // Put back the original value for the rest of the function
     unsigned char cameraFOVPatch[13] = { 0xB9, NOP, NOP, NOP, NOP, 0x89, 0x4E, 0x44, 0xB9, 0x00, 0x00, 0x80, 0x3F };
     memmove(&(cameraFOVPatch[1]), (void*)(&g_config.cameraFOV), 4);
-    WriteBytes(CAMERAFOVCHANGE_ADDR, cameraFOVPatch, sizeof(cameraFOVPatch));
+    WriteBytesChecked(modName, CAMERAFOVCHANGE_ADDR, cameraFOVPatch, sizeof(cameraFOVPatch));
 
     // Need to patch the two rel16 function call. These two writes both do -8 on the relative call
     unsigned char cameraFOVF1 = 0x3e;
-    WriteBytes(CAMERAFOVCHANGEF1_ADDR, &cameraFOVF1, 1);
+    WriteBytesChecked(modName, CAMERAFOVCHANGEF1_ADDR, &cameraFOVF1, 1);
     unsigned char cameraFOVF2 = 0x65;
-    WriteBytes(CAMERAFOVCHANGEF2_ADDR, &cameraFOVF2, 1);
+    WriteBytesChecked(modName, CAMERAFOVCHANGEF2_ADDR, &cameraFOVF2, 1);
 }
 
 void patchSkipRaceCutscene()
@@ -124,7 +185,7 @@ void patchSkipRaceCutscene()
     if (g_config.skipRaceCutscene == false)
         return;
     unsigned char nops[5] = { NOP, NOP, NOP, NOP, NOP };
-    WriteBytes(SKIPRACECUTSCENE_ADDR, nops, sizeof(nops));
+    WriteBytesChecked(modName, SKIPRACECUTSCENE_ADDR, nops, sizeof(nops));
 }
 
 void patchSkipIntroCamera()
@@ -133,7 +194,7 @@ void patchSkipIntroCamera()
         return;
     unsigned char* SKIPINTROCAMERA_ADDR = (unsigned char*)0x0045e2d5;
     float f = 0.0;
-    WriteBytes(SKIPINTROCAMERA_ADDR, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(modName, SKIPINTROCAMERA_ADDR, (unsigned char*)&f, sizeof(float));
 }
 
 void patchUseHighestLOD()
@@ -142,7 +203,7 @@ void patchUseHighestLOD()
         return;
     unsigned char* USEHIGHESTLOD_ADDR = (unsigned char*)0x00431748;
     unsigned char nops[3] = { NOP, NOP, NOP };
-    WriteBytes(USEHIGHESTLOD_ADDR, nops, sizeof(nops));
+    WriteBytesChecked(modName, USEHIGHESTLOD_ADDR, nops, sizeof(nops));
 }
 
 void patchTrimCountdown()
@@ -152,7 +213,7 @@ void patchTrimCountdown()
 
     unsigned char* TRIMCOUNTDOWN_ADDR = (unsigned char*)0x0045e065;
     float f = 1.1;
-    WriteBytes(TRIMCOUNTDOWN_ADDR, (unsigned char*)(&f), sizeof(float));
+    WriteBytesChecked(modName, TRIMCOUNTDOWN_ADDR, (unsigned char*)(&f), sizeof(float));
 }
 
 void patchSkipCantinaScene()
@@ -161,7 +222,7 @@ void patchSkipCantinaScene()
         return;
     unsigned char* SKIPCANTINASCENE_ADDR = (unsigned char*)0x004352ab;
     unsigned char newScene = 0x9;
-    WriteBytes(SKIPCANTINASCENE_ADDR, &newScene, sizeof(unsigned char));
+    WriteBytesChecked(modName, SKIPCANTINASCENE_ADDR, &newScene, sizeof(unsigned char));
 }
 
 void patchFasterLoad()
@@ -171,8 +232,8 @@ void patchFasterLoad()
     unsigned char* FASTERLOAD_ADDR1 = (unsigned char*)0x0045d0db;
     unsigned char* FASTERLOAD_ADDR2 = (unsigned char*)0x00463b87;
     float f = 0.0;
-    WriteBytes(FASTERLOAD_ADDR1, (unsigned char*)&f, sizeof(float));
-    WriteBytes(FASTERLOAD_ADDR2, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(modName, FASTERLOAD_ADDR1, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(modName, FASTERLOAD_ADDR2, (unsigned char*)&f, sizeof(float));
 }
 
 int applyPatches()
@@ -193,7 +254,7 @@ int applyPatches()
     patchSkipCantinaScene();
     patchFasterLoad();
 
-    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, NULL);
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, nullptr);
 
     if (g_config.developperMode)
     {
@@ -217,8 +278,8 @@ void hookInit(void)
     unsigned char core[5] = { 'c', 'o', 'r', 'e', 0 };
     unsigned char init[5] = { 'i', 'n', 'i', 't', 0 };
 
-    WriteBytes(CORECSTR_ADDR, core, 5);
-    WriteBytes(INITCSTR_ADDR, init, 5);
+    WriteBytes(CORECSTR_ADDR, core, NULL, 5);
+    WriteBytes(INITCSTR_ADDR, init, NULL, 5);
 
     // Improved for init(HINSTANCE hInstance, PSTR pCmdLine, int nCmdShow);
     unsigned char init_hook_code[] = {
@@ -228,11 +289,11 @@ void hookInit(void)
         0x50, // push eax
         0xff, 0x15, 0x78, 0xc1, 0x4a, 0x00, // call GetProcAddress(Handle, INITCSTR_ADDR);
         0xff, 0xe0, // jmp eax init(hInstance, hPrevInstance, pCmdLine, nCmdShow);
-        0x83, 0xc4, 0x10, // add ESP, 0x10
+        0x83, 0xc4, 0x10, // add ESP, 0x10 // is this cleanup necessary ? OpenJKDF2 doesn't do it. Is it 0x10 and not 0xC ?
         0x33, 0xc0, // xor eax, eax
         0xc2, 0x10, 0x00 // ret 0x10
     };
-    WriteBytes(WINMAIN_ADDR, init_hook_code, sizeof(init_hook_code));
+    WriteBytes(WINMAIN_ADDR, init_hook_code, NULL, sizeof(init_hook_code));
 
     // The shell code without the C syntax:
     /*
@@ -246,7 +307,26 @@ void hookInit(void)
         33 c0
         c2 10 00
     */
-    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, NULL);
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, nullptr);
+}
+
+// #undef DrawText
+
+void runGui()
+{
+    rl::InitWindow(800, 450, "raylib [core] example - basic window");
+
+    while (!rl::WindowShouldClose())
+    {
+        rl::BeginDrawing();
+        rl::Color white{ 245, 245, 245, 245 };
+        rl::Color lightgray{ 200, 200, 200, 255 };
+        rl::ClearBackground(white);
+        rl::DrawText("Congrats! You created your first window!", 190, 200, 20, lightgray);
+        rl::EndDrawing();
+    }
+
+    rl::CloseWindow();
 }
 
 extern "C"
@@ -260,10 +340,11 @@ extern "C"
 
         // TODO: Real hooks here
         // applyPatches();
+        runGui();
 
         // Call original main
-        int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, char*))0x0049cd40;
-        Window_Main(hInstance, NULL, pCmdLine, nCmdShow, "Modded game window");
+        int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, const char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, const char*))0x0049cd40;
+        Window_Main(hInstance, nullptr, pCmdLine, nCmdShow, "Modded game window");
     }
 }
 

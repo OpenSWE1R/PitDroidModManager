@@ -24,10 +24,10 @@ THISPYTHON = "python" + sys.version[0:4]
 SOURCES_LOADER = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join(THISDIR, "src", "modloader", "md5.c")]
 FLAGS_LOADER = ["-g", "-Wall", "-Wextra", "-pedantic"]
 
-INCLUDES = ["-I.", "-Isrc"]
+INCLUDES = ["-I.", "-Isrc", "-Iraylib\include"]
 # -DINCLUDE_DX_HEADERS=1 doesnt include the correct headers for some reasons. Missing -I ?
-FLAGS = ["-s", "-shared", "-Wall", "-Wextra", "-Wno-unused-parameter", "-Wno-unused-variable", "-g"]
-LIBS = ["-lgdi32", "-lcomctl32", "-lole32", "-lwinmm"]
+FLAGS = ["-std=c++20", "-s", "-shared", "-Wall", "-Wextra", "-Wno-unused-parameter", "-Wno-unused-variable", "-g"]
+LIBS = ["-Lraylib\lib", "-lraylib", "-lgdi32", "-lcomctl32", "-lole32", "-lwinmm"]
 
 IGNORED_SOURCES = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp")]
 SOURCES = glob.glob(os.path.join(THISDIR, "src", "**", "*.c"), recursive=True) + glob.glob(os.path.join(THISDIR, "src", "**", "*.cpp"), recursive=True)
@@ -86,7 +86,7 @@ def compileSource(sourceFile, objdir, force):
     if (not force and os.path.isfile(objpath) and os.path.getmtime(sourceFile) < os.path.getmtime(objpath)):
         return status, objpath
 
-    status = runLogged(["g++", "-c", sourceFile, "-o", objpath] + FLAGS + INCLUDES + LIBS)
+    status = runLogged(["g++"] + [ "-c", sourceFile, "-o", objpath] + FLAGS + INCLUDES + LIBS)
     return status, objpath
 
 def main(args):
@@ -110,7 +110,7 @@ def main(args):
     if not os.path.isdir(objdir):
         os.mkdir(objdir)
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(args.jobs) as executor:
         futures = [executor.submit(compileSource, SOURCES[i], objdir, args.force) for i in range(len(SOURCES))]
         results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
