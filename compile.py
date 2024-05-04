@@ -24,15 +24,79 @@ THISPYTHON = "python" + sys.version[0:4]
 SOURCES_LOADER = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join(THISDIR, "src", "modloader", "md5.c")]
 FLAGS_LOADER = ["-g", "-Wall", "-Wextra", "-pedantic"]
 
-INCLUDES = ["-I.", "-Isrc", "-Iraylib\include"]
+'''
+g++
+src/dllmain.cpp
+src/config.c
+imgui-1.90.5/imgui.cpp imgui-1.90.5/imgui_demo.cpp imgui-1.90.5/imgui_draw.cpp imgui-1.90.5/imgui_tables.cpp imgui-1.90.5/imgui_widgets.cpp imgui-1.90.5/backends/imgui_impl_sdl2.cpp imgui-1.90.5/backends/imgui_impl_opengl3.cpp
+
+-o core.dll
+
+-std=c++20 -g -Wall -Wformat -s -shared
+
+-Isrc/ -ISDL2/include/ -Iimgui-1.90.5 -Iimgui-1.90.5/backends
+-LSDL2/
+-lgdi32 -lopengl32 -lmingw32 -mwindows -lSDL2main -lSDL2 -luser32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -ldinput8
+
+-Dmain=SDL_main
+'''
+
+SOURCES_IMGUI = [
+    "imgui-1.90.5/imgui.cpp",
+    "imgui-1.90.5/imgui_demo.cpp",
+    "imgui-1.90.5/imgui_draw.cpp",
+    "imgui-1.90.5/imgui_tables.cpp",
+    "imgui-1.90.5/imgui_widgets.cpp",
+    "imgui-1.90.5/backends/imgui_impl_sdl2.cpp",
+    "imgui-1.90.5/backends/imgui_impl_opengl3.cpp"
+]
+
+INCLUDES = [
+    "-Isrc/",
+    "-ISDL2/include",
+    "-Iimgui-1.90.5",
+    "-Iimgui-1.90.5",
+    "-Iimgui-1.90.5/backends"
+]
+INCLUDES_LIBS = ["-LSDL2/"]
+
 # -DINCLUDE_DX_HEADERS=1 doesnt include the correct headers for some reasons. Missing -I ?
-FLAGS = ["-std=c++20", "-s", "-shared", "-Wall", "-Wextra", "-Wno-unused-parameter", "-Wno-unused-variable", "-g"]
-LIBS = ["-Lraylib\lib", "-lraylib", "-lgdi32", "-lcomctl32", "-lole32", "-lwinmm"]
+FLAGS = [
+    "-std=c++20",
+    "-s",
+    "-shared",
+    "-Wall",
+    "-Wextra",
+    "-Wno-unused-parameter",
+    "-Wno-unused-variable",
+    "-g"
+]
+LIBS = [
+    "-lgdi32",
+    "-lopengl32",
+    "-lmingw32",
+    "-mwindows",
+    "-lSDL2main",
+    "-lSDL2",
+    "-luser32",
+    "-lwinmm",
+    "-limm32",
+    "-lole32",
+    "-loleaut32",
+    "-lversion",
+    "-luuid",
+    "-ladvapi32",
+    "-lsetupapi",
+    "-lshell32",
+    "-ldinput8"
+]
 
 IGNORED_SOURCES = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp")]
 SOURCES = glob.glob(os.path.join(THISDIR, "src", "**", "*.c"), recursive=True) + glob.glob(os.path.join(THISDIR, "src", "**", "*.cpp"), recursive=True)
 for ignored in IGNORED_SOURCES:
     SOURCES.remove(ignored)
+
+SOURCES += SOURCES_IMGUI
 
 def printerr(s):
     print(f"{colors.FAIL}{s}{colors.ENDC}")
@@ -75,7 +139,8 @@ def runLogged(args, cwd=None):
         printerr(err)
         printerr(f"Returned status code {status}")
     else:
-        print(out)
+        if (out != ""):
+            print(out)
 
     return status
 
@@ -86,7 +151,7 @@ def compileSource(sourceFile, objdir, force):
     if (not force and os.path.isfile(objpath) and os.path.getmtime(sourceFile) < os.path.getmtime(objpath)):
         return status, objpath
 
-    status = runLogged(["g++"] + [ "-c", sourceFile, "-o", objpath] + FLAGS + INCLUDES + LIBS)
+    status = runLogged(["g++"] + [ "-c", sourceFile, "-o", objpath] + FLAGS + INCLUDES)
     return status, objpath
 
 def main(args):
@@ -105,8 +170,11 @@ def main(args):
     OBJS = []
     failed = False
 
+    buildDir = os.path.join(THISDIR, "build")
     objdir = os.path.join(THISDIR, "build", "PitDroidModManager_core")
 
+    if not os.path.isdir(buildDir):
+        os.mkdir(buildDir)
     if not os.path.isdir(objdir):
         os.mkdir(objdir)
 
@@ -123,7 +191,7 @@ def main(args):
     if (failed):
         printerr("Some object file compilation failed. Aborting now")
         sys.exit(1)
-    elif (runLogged(["g++"] + OBJS + ["-o", os.path.join(THISDIR, "build", "core.dll")] + FLAGS + INCLUDES + LIBS) != 0):
+    elif (runLogged(["g++"] + OBJS + ["-o", os.path.join(THISDIR, "build", "core.dll")] + FLAGS + LIBS) != 0):
         sys.exit(1)
 
     shutil.copyfile(os.path.join(THISDIR, "config", "coreConfig.txt"), os.path.join(THISDIR, "build", "coreConfig.txt"))
