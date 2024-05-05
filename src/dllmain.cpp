@@ -12,6 +12,7 @@
 #include <bitset>
 
 #include "imgui.h"
+#include "imgui_stdlib.h"
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl3.h"
 #include <SDL.h>
@@ -315,11 +316,123 @@ void hookInit(void)
     VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, nullptr);
 }
 
-// #undef DrawText
+inline void SetupImGuiStyle(bool bStyleDark_, float alpha_)
+{
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    /*
+     Text color rgb(183, 245, 255)
+     Selected Text color rgb(255, 255, 255)
+     yellow text: #FBDD01 rgb(251, 221, 1)
+    yellow ui outline #EEFF00 rgb(238, 255, 0) + blue ui inline #00DDFF rgb(0, 221, 255)
+    yellow hover #616800FF
+    yellow active #A2AD00FF
+    selected item outline #999896 rgb(153, 152, 150)
+
+    orange text #FF7D00 rgb(255, 125, 0)
+    red text #FF0000 rgb(255, 0, 0)
+    yellow "disabled" / background #757D00 rgb(117, 125, 0)
+
+    */
+    style.Alpha = 1.0f;
+    style.WindowRounding = 12.0f;
+    style.ChildRounding = 12.0f;
+    style.FrameRounding = 12.0f;
+    style.PopupRounding = 12.0f;
+    style.ScrollbarRounding = 12.0f;
+    style.GrabRounding = 12.0f;
+    style.TabRounding = 12.0f;
+    style.Colors[ImGuiCol_Text] = ImVec4(0.73f, 0.96f, 1.00f, 1.00f);
+    style.Colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
+    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.06f, 0.06f, 0.06f, 0.94f);
+    style.Colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    style.Colors[ImGuiCol_PopupBg] = ImVec4(0.08f, 0.08f, 0.08f, 0.94f);
+    style.Colors[ImGuiCol_Border] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_BorderShadow] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.38f, 0.41f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.63f, 0.68f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_TitleBg] = ImVec4(0.04f, 0.04f, 0.04f, 1.00f);
+    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.16f, 0.29f, 0.48f, 1.00f);
+    style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 0.51f);
+    style.Colors[ImGuiCol_MenuBarBg] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
+    style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.02f, 0.53f);
+    style.Colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.31f, 0.31f, 0.31f, 1.00f);
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.41f, 0.41f, 0.41f, 1.00f);
+    style.Colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.51f, 0.51f, 0.51f, 1.00f);
+    style.Colors[ImGuiCol_CheckMark] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_SliderGrab] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
+    style.Colors[ImGuiCol_Button] = ImVec4(0.26f, 0.59f, 0.98f, 0.40f);
+    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_ButtonActive] = ImVec4(0.06f, 0.53f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_Header] = ImVec4(0.26f, 0.59f, 0.98f, 0.31f);
+    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    style.Colors[ImGuiCol_HeaderActive] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_Separator] = ImVec4(0.43f, 0.43f, 0.50f, 0.50f);
+    style.Colors[ImGuiCol_SeparatorHovered] = ImVec4(0.10f, 0.40f, 0.75f, 0.78f);
+    style.Colors[ImGuiCol_SeparatorActive] = ImVec4(0.10f, 0.40f, 0.75f, 1.00f);
+    style.Colors[ImGuiCol_ResizeGrip] = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
+    style.Colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.67f);
+    style.Colors[ImGuiCol_ResizeGripActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.95f);
+    style.Colors[ImGuiCol_Tab] = ImVec4(0.18f, 0.35f, 0.58f, 0.86f);
+    style.Colors[ImGuiCol_TabHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.80f);
+    style.Colors[ImGuiCol_TabActive] = ImVec4(0.20f, 0.41f, 0.68f, 1.00f);
+    style.Colors[ImGuiCol_TabUnfocused] = ImVec4(0.07f, 0.10f, 0.15f, 0.97f);
+    style.Colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.14f, 0.26f, 0.42f, 1.00f);
+    style.Colors[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
+    style.Colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
+    style.Colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_TableHeaderBg] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderStrong] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_TableBorderLight] = ImVec4(0.93f, 1.00f, 0.00f, 1.00f);
+    style.Colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    style.Colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
+    style.Colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
+    style.Colors[ImGuiCol_DragDropTarget] = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
+    style.Colors[ImGuiCol_NavHighlight] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    style.Colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
+    style.Colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
+    style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
+
+    if (bStyleDark_)
+    {
+        for (int i = 0; i <= ImGuiCol_COUNT; i++)
+        {
+            ImVec4& col = style.Colors[i];
+            float H, S, V;
+            ImGui::ColorConvertRGBtoHSV(col.x, col.y, col.z, H, S, V);
+
+            if (S < 0.1f)
+            {
+                V = 1.0f - V;
+            }
+            ImGui::ColorConvertHSVtoRGB(H, S, V, col.x, col.y, col.z);
+            if (col.w < 1.00f)
+            {
+                col.w *= alpha_;
+            }
+        }
+    }
+    else
+    {
+        for (int i = 0; i <= ImGuiCol_COUNT; i++)
+        {
+            ImVec4& col = style.Colors[i];
+            if (col.w < 1.00f)
+            {
+                col.x *= alpha_;
+                col.y *= alpha_;
+                col.z *= alpha_;
+                col.w *= alpha_;
+            }
+        }
+    }
+}
 
 int runGui()
 {
-    // Setup SDL
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
     {
         printf("Error: %s\n", SDL_GetError());
@@ -333,12 +446,10 @@ int runGui()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
-    // From 2.0.18: Enable native IME.
 #ifdef SDL_HINT_IME_SHOW_UI
     SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
 #endif
 
-    // Create window with graphics context
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -354,49 +465,34 @@ int runGui()
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
 
-    // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-    // Setup Dear ImGui style
-    ImGui::StyleColorsDark();
+    // ImGui::StyleColorsDark();
     // ImGui::StyleColorsLight();
+    SetupImGuiStyle(false, 1.0);
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
     ImGui_ImplOpenGL3_Init(glsl_version);
 
-    // Load Fonts
-    // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select
-    // them.
-    // - AddFontFromFileTTF() will return the ImFont* so you can store it if you need to select the font among multiple.
-    // - If the file cannot be loaded, the function will return a nullptr. Please handle those errors in your application (e.g. use an assertion, or
-    // display an error and quit).
-    // - The fonts will be rasterized at a given size (w/ oversampling) and stored into a texture when calling
-    // ImFontAtlas::Build()/GetTexDataAsXXXX(), which ImGui_ImplXXXX_NewFrame below will call.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use Freetype for higher quality font rendering.
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    // - Our Emscripten build process allows embedding fonts to be accessible at runtime from the "fonts/" folder. See Makefile.emscripten for
-    // details.
-    // io.Fonts->AddFontDefault();
-    // io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0f);
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0f);
-    // io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0f);
-    // ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesJapanese());
-    // IM_ASSERT(font != nullptr);
+    ImFont* default_font = io.Fonts->AddFontFromFileTTF("./mods/DroidSans.ttf", 18.0f);
+    IM_ASSERT(default_font != nullptr);
+    ImFont* swe1r_font = io.Fonts->AddFontFromFileTTF("./mods/swe1r-font.ttf", 36.0f, nullptr, io.Fonts->GetGlyphRangesDefault());
+    IM_ASSERT(swe1r_font != nullptr);
 
     // Our state
     bool show_demo_window = true;
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    char* myList[] = { "abc", "def", "ghi", "lmno", "pqrst" };
+    size_t nbElements = 5;
+    std::vector<std::string> myvec{ "abc", "def", "ghi", "lmo", "pqrst" };
 
-    // Main loop
     bool done = false;
     while (!done)
     {
@@ -421,35 +517,86 @@ int runGui()
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear
-        // ImGui!).
         if (show_demo_window)
             ImGui::ShowDemoWindow(&show_demo_window);
 
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
         {
             static float f = 0.0f;
             static int counter = 0;
 
-            ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
+            ImGui::Begin("HELLO, WORLD!");
 
-            ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
-            ImGui::Checkbox("Demo Window", &show_demo_window); // Edit bools storing our window open/close state
+            float old_scale = swe1r_font->Scale;
+            swe1r_font->Scale *= 2;
+            ImGui::PushFont(swe1r_font);
+
+            ImGui::Text("THIS IS SOME USEFUL TEXT.");
+
+            swe1r_font->Scale = old_scale;
+            ImGui::PopFont();
+
+            ImGui::PushFont(swe1r_font);
+
+            ImGui::Text("now this is podracing.");
+            ImGui::PopFont();
+
+            ImGui::Checkbox("DEMO WINDOW", &show_demo_window);
             ImGui::Checkbox("Another Window", &show_another_window);
 
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
+            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
+            ImGui::ColorEdit3("clear color", (float*)&clear_color);
 
-            if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
+            if (ImGui::Button("button"))
                 counter++;
             ImGui::SameLine();
             ImGui::Text("counter = %d", counter);
 
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+            ImGui::Text("application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+
+            // ImGui::Button(myvec[0].data(), ImVec2(60, 60));
+            // ImGui::Button(myvec[1].data(), ImVec2(60, 60));
+
+            if (ImGui::TreeNode("Drag and drop to copy/swap items"))
+            {
+                for (size_t n = 0; n < myvec.size(); n++)
+                {
+                    ImGui::PushID(n);
+                    // if ((n % 3) != 0)
+                    //     ImGui::SameLine();
+                    ImGui::Button(myvec[n].data(), ImVec2(60, 30));
+
+                    // Our buttons are both drag sources and drag targets here!
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                    {
+                        ImGui::SetDragDropPayload("DND_DEMO_CELL", &n, sizeof(int));
+                        ImGui::EndDragDropSource();
+                    }
+
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("DND_DEMO_CELL"))
+                        {
+                            IM_ASSERT(payload->DataSize == sizeof(int));
+                            int payload_n = *(const int*)payload->Data;
+
+                            std::swap(myvec[n], myvec[payload_n]);
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+
+            std::string myString{ "Hello, world!" };
+            if (ImGui::InputText("input text", &myString, ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                myvec.push_back(myString);
+            }
+
             ImGui::End();
         }
 
-        // 3. Show another simple window.
         if (show_another_window)
         {
             ImGui::Begin("Another Window", &show_another_window); // Pass a pointer to our bool variable (the window will have a closing button that
@@ -469,7 +616,6 @@ int runGui()
         SDL_GL_SwapWindow(window);
     }
 
-    // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
@@ -486,13 +632,15 @@ extern "C"
     __declspec(dllexport) void init(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow)
     {
         printf("Init called inside core dll ! Hooked successfuly.\n");
-        int i = 0;
-        Sleep(2000);
-        printf("Waiting in init %d\n", i);
+        // int i = 0;
+        // Sleep(2000);
+        // printf("Waiting in init %d\n", i);
 
         // TODO: Real hooks here
         // applyPatches();
         runGui();
+        // TODO
+        std::exit(1);
 
         // Call original main
         int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, const char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, const char*))0x0049cd40;

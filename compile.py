@@ -24,29 +24,13 @@ THISPYTHON = "python" + sys.version[0:4]
 SOURCES_LOADER = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join(THISDIR, "src", "modloader", "md5.c")]
 FLAGS_LOADER = ["-g", "-Wall", "-Wextra", "-pedantic"]
 
-'''
-g++
-src/dllmain.cpp
-src/config.c
-imgui-1.90.5/imgui.cpp imgui-1.90.5/imgui_demo.cpp imgui-1.90.5/imgui_draw.cpp imgui-1.90.5/imgui_tables.cpp imgui-1.90.5/imgui_widgets.cpp imgui-1.90.5/backends/imgui_impl_sdl2.cpp imgui-1.90.5/backends/imgui_impl_opengl3.cpp
-
--o core.dll
-
--std=c++20 -g -Wall -Wformat -s -shared
-
--Isrc/ -ISDL2/include/ -Iimgui-1.90.5 -Iimgui-1.90.5/backends
--LSDL2/
--lgdi32 -lopengl32 -lmingw32 -mwindows -lSDL2main -lSDL2 -luser32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -ladvapi32 -lsetupapi -lshell32 -ldinput8
-
--Dmain=SDL_main
-'''
-
 SOURCES_IMGUI = [
     "imgui-1.90.5/imgui.cpp",
     "imgui-1.90.5/imgui_demo.cpp",
     "imgui-1.90.5/imgui_draw.cpp",
     "imgui-1.90.5/imgui_tables.cpp",
     "imgui-1.90.5/imgui_widgets.cpp",
+    "imgui-1.90.5/imgui_stdlib.cpp",
     "imgui-1.90.5/backends/imgui_impl_sdl2.cpp",
     "imgui-1.90.5/backends/imgui_impl_opengl3.cpp"
 ]
@@ -171,15 +155,19 @@ def main(args):
     failed = False
 
     buildDir = os.path.join(THISDIR, "build")
-    objdir = os.path.join(THISDIR, "build", "PitDroidModManager_core")
+    objDir = os.path.join(THISDIR, "build", "PitDroidModManager_core")
+    modsDir = os.path.join(THISDIR, "build", "mods")
+    assetsDir = os.path.join(THISDIR, "assets")
 
     if not os.path.isdir(buildDir):
         os.mkdir(buildDir)
-    if not os.path.isdir(objdir):
-        os.mkdir(objdir)
+    if not os.path.isdir(objDir):
+        os.mkdir(objDir)
+    if not os.path.isdir(modsDir):
+        os.mkdir(modsDir)
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as executor:
-        futures = [executor.submit(compileSource, SOURCES[i], objdir, args.force) for i in range(len(SOURCES))]
+        futures = [executor.submit(compileSource, SOURCES[i], objDir, args.force) for i in range(len(SOURCES))]
         results = [future.result() for future in concurrent.futures.as_completed(futures)]
 
     for status, result_objdir in results:
@@ -194,7 +182,8 @@ def main(args):
     elif (runLogged(["g++"] + OBJS + ["-o", os.path.join(THISDIR, "build", "core.dll")] + FLAGS + LIBS) != 0):
         sys.exit(1)
 
-    shutil.copyfile(os.path.join(THISDIR, "config", "coreConfig.txt"), os.path.join(THISDIR, "build", "coreConfig.txt"))
+    for filename in os.listdir(os.path.join(THISDIR, "assets")):
+        shutil.copyfile(os.path.join(assetsDir, filename), os.path.join(modsDir, filename))
 
     print(f"{colors.OKGREEN}Compilation successful ! Outputs are in build/{colors.ENDC}")
     return
