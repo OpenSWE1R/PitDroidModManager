@@ -50,10 +50,10 @@ void parseConfig()
 {
     setDefaultConfigValues();
 
-    FILE* config_file = fopen("coreConfig.txt", "r");
+    FILE* config_file = fopen("./mods/coreConfig.txt", "r");
     if (config_file == NULL)
     {
-        printf("Warning: 'coreConfig.txt' file not found. Defaults values will be used.\n");
+        printf("Warning: './mods/coreConfig.txt' file not found. Defaults values will be used.\n");
         return;
     }
 

@@ -10,6 +10,8 @@
 #include <cstring>
 #include <memory>
 #include <bitset>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #include "imgui.h"
 #include "imgui_stdlib.h"
@@ -431,6 +433,25 @@ inline void SetupImGuiStyle(bool bStyleDark_, float alpha_)
     }
 }
 
+void getMods(std::vector<std::string>& outmods)
+{
+    std::string mod_path{ "./mods" };
+    for (const auto& entry : fs::directory_iterator(mod_path))
+    {
+        std::filesystem::path fullnamePath = entry.path().filename();
+        std::string fullname = fullnamePath.string();
+        const char* extension = fullnamePath.extension().string().c_str();
+        if (std::strcmp(extension, ".dll") == 0)
+        {
+            outmods.push_back(fullname);
+        }
+        else
+        {
+            printf("Ignoring %s when searching for mods\n", fullname.c_str());
+        }
+    }
+}
+
 int runGui()
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
@@ -487,11 +508,9 @@ int runGui()
 
     // Our state
     bool show_demo_window = true;
-    bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    char* myList[] = { "abc", "def", "ghi", "lmno", "pqrst" };
-    size_t nbElements = 5;
-    std::vector<std::string> myvec{ "abc", "def", "ghi", "lmo", "pqrst" };
+    std::vector<std::string> mods_items{};
+    getMods(mods_items);
 
     bool done = false;
     while (!done)
@@ -541,69 +560,49 @@ int runGui()
             ImGui::PopFont();
 
             ImGui::Checkbox("DEMO WINDOW", &show_demo_window);
-            ImGui::Checkbox("Another Window", &show_another_window);
 
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-            ImGui::ColorEdit3("clear color", (float*)&clear_color);
-
-            if (ImGui::Button("button"))
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-
-            // ImGui::Button(myvec[0].data(), ImVec2(60, 60));
-            // ImGui::Button(myvec[1].data(), ImVec2(60, 60));
-
-            if (ImGui::TreeNode("Drag and drop to copy/swap items"))
+            ImGui::Separator();
+            if (mods_items.size() == 0)
             {
-                for (size_t n = 0; n < myvec.size(); n++)
+                ImGui::Text("No mods detected in the ./mods folder. Check that the mods are dll files");
+            }
+            else
+            {
+                for (size_t n = 0; n < mods_items.size(); n++)
                 {
                     ImGui::PushID(n);
-                    // if ((n % 3) != 0)
-                    //     ImGui::SameLine();
-                    ImGui::Button(myvec[n].data(), ImVec2(60, 30));
+                    ImGui::Button(mods_items[n].c_str());
 
                     // Our buttons are both drag sources and drag targets here!
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                     {
-                        ImGui::SetDragDropPayload("DND_DEMO_CELL", &n, sizeof(int));
+                        ImGui::SetDragDropPayload("MOD_ITEM_CELL", &n, sizeof(int));
+                        ImGui::Text("Swap %s with another mod", mods_items[n].c_str());
                         ImGui::EndDragDropSource();
                     }
 
                     if (ImGui::BeginDragDropTarget())
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("DND_DEMO_CELL"))
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MOD_ITEM_CELL"))
                         {
                             IM_ASSERT(payload->DataSize == sizeof(int));
                             int payload_n = *(const int*)payload->Data;
 
-                            std::swap(myvec[n], myvec[payload_n]);
+                            std::swap(mods_items[n], mods_items[payload_n]);
                         }
                         ImGui::EndDragDropTarget();
                     }
                     ImGui::PopID();
                 }
-                ImGui::TreePop();
             }
 
-            std::string myString{ "Hello, world!" };
-            if (ImGui::InputText("input text", &myString, ImGuiInputTextFlags_EnterReturnsTrue))
+            ImGui::Separator();
+            if (ImGui::Button("Refresh folder"))
             {
-                myvec.push_back(myString);
+                mods_items.clear();
+                getMods(mods_items);
             }
 
-            ImGui::End();
-        }
-
-        if (show_another_window)
-        {
-            ImGui::Begin("Another Window", &show_another_window); // Pass a pointer to our bool variable (the window will have a closing button that
-                                                                  // will clear the bool when clicked)
-            ImGui::Text("Hello from another window!");
-            if (ImGui::Button("Close Me"))
-                show_another_window = false;
             ImGui::End();
         }
 
