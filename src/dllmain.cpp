@@ -42,6 +42,19 @@ typedef struct ChangeItem
     std::unique_ptr<unsigned char[]> oldBytes;
 } ChangeItem;
 
+typedef struct ModItem
+{
+    std::filesystem::path path;
+    std::string filename;
+    bool activated;
+} ModItem;
+
+// original main arguments
+HINSTANCE g_hInstance;
+HINSTANCE g_hPrevInstance;
+PSTR g_pCmdLine;
+int g_nCmdShow;
+
 std::vector<ChangeItem> g_changes;
 std::bitset<SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN> collisionsMask;
 const std::string modName("core");
@@ -433,25 +446,71 @@ inline void SetupImGuiStyle(bool bStyleDark_, float alpha_)
     }
 }
 
-void getMods(std::vector<std::string>& outmods)
+void getMods(std::vector<ModItem>& outmods)
 {
+    printf("Getting all mods in the mod folder...\n");
     std::string mod_path{ "./mods" };
     for (const auto& entry : fs::directory_iterator(mod_path))
     {
-        std::filesystem::path fullnamePath = entry.path().filename();
-        std::string fullname = fullnamePath.string();
+        std::filesystem::path fullnamePath = entry.path();
+        std::string filename = fullnamePath.filename().string();
         const char* extension = fullnamePath.extension().string().c_str();
         if (std::strcmp(extension, ".dll") == 0)
         {
-            outmods.push_back(fullname);
+            outmods.push_back(ModItem{ fullnamePath, filename, false });
         }
         else
         {
-            printf("Ignoring %s when searching for mods\n", fullname.c_str());
+            printf("\tIgnoring %s when searching for mods\n", filename.c_str());
         }
     }
 }
 
+typedef void(__stdcall* mod_initf)(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow);
+
+/**
+ * @return true on error
+ */
+bool runPatching(std::vector<ModItem> mods_items)
+{
+    printf("Running Patching...\n");
+
+    for (const ModItem& item : mods_items)
+    {
+        if (item.activated)
+        {
+            HINSTANCE handle = LoadLibraryA(item.path.string().c_str());
+            if (!handle)
+            {
+                printf("Error: Cannot load %s. Refresh the dll list before patching.\n", item.filename.c_str());
+                return true;
+            }
+
+            mod_initf mod_init = (mod_initf)GetProcAddress(handle, "init");
+            if (!mod_init)
+            {
+                printf("Error: Cannot find \"init\" function in the mod %s. Make sure the function symbol is properly exported.\n",
+                       item.filename.c_str());
+                return true;
+            }
+
+            mod_init(g_hInstance, g_hPrevInstance, g_pCmdLine, g_nCmdShow);
+            // check for collision error
+            // undo all patches if any error
+
+            // if any error, terminate early
+            printf("Some error occured when trying to patch \"%s\"\n", item.filename.c_str());
+            return true;
+        }
+    }
+
+    printf("Patching completed successfuly !\n");
+    return false;
+}
+
+/**
+ * @return 1 if want to run game, 0 if not, -1 on error
+ */
 int runGui()
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)
@@ -509,8 +568,10 @@ int runGui()
     // Our state
     bool show_demo_window = true;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-    std::vector<std::string> mods_items{};
+    std::vector<ModItem> mods_items{};
     getMods(mods_items);
+    bool patchError = false;
+    bool runGame = false;
 
     bool done = false;
     while (!done)
@@ -560,6 +621,7 @@ int runGui()
             ImGui::PopFont();
 
             ImGui::Checkbox("DEMO WINDOW", &show_demo_window);
+            ImGui::Text("Use your mouse to drag and drop to re-order mods.");
 
             ImGui::Separator();
             if (mods_items.size() == 0)
@@ -571,13 +633,15 @@ int runGui()
                 for (size_t n = 0; n < mods_items.size(); n++)
                 {
                     ImGui::PushID(n);
-                    ImGui::Button(mods_items[n].c_str());
+                    ImGui::Checkbox("Activated", &mods_items[n].activated);
+                    ImGui::SameLine();
+                    ImGui::Button(mods_items[n].filename.c_str());
 
                     // Our buttons are both drag sources and drag targets here!
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                     {
                         ImGui::SetDragDropPayload("MOD_ITEM_CELL", &n, sizeof(int));
-                        ImGui::Text("Swap %s with another mod", mods_items[n].c_str());
+                        ImGui::Text("Swap %s with another mod", mods_items[n].filename.c_str());
                         ImGui::EndDragDropSource();
                     }
 
@@ -603,6 +667,25 @@ int runGui()
                 getMods(mods_items);
             }
 
+            if (ImGui::Button("Patch and Run game"))
+            {
+                patchError = runPatching(mods_items);
+                if (!patchError)
+                {
+                    done = true;
+                    runGame = true;
+                }
+                else
+                {
+                    printf("TODO, unpatch everything\n");
+                }
+            }
+
+            if (patchError)
+            {
+                ImGui::TextColored(ImVec4(1.0, 0.0, 0.0, 1.0), "Some patch error occured. Check the debug console for more informations.");
+            }
+
             ImGui::End();
         }
 
@@ -623,6 +706,11 @@ int runGui()
     SDL_DestroyWindow(window);
     SDL_Quit();
 
+    if (runGame)
+    {
+        return 1;
+    }
+
     return 0;
 }
 
@@ -631,19 +719,22 @@ extern "C"
     __declspec(dllexport) void init(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow)
     {
         printf("Init called inside core dll ! Hooked successfuly.\n");
-        // int i = 0;
-        // Sleep(2000);
-        // printf("Waiting in init %d\n", i);
+        g_hInstance = hInstance;
+        g_hPrevInstance = hPrevInstance;
+        g_pCmdLine = pCmdLine;
+        g_nCmdShow = nCmdShow;
 
-        // TODO: Real hooks here
         // applyPatches();
-        runGui();
-        // TODO
-        std::exit(1);
-
-        // Call original main
-        int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, const char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, const char*))0x0049cd40;
-        Window_Main(hInstance, nullptr, pCmdLine, nCmdShow, "Modded game window");
+        int result = runGui();
+        if (result == 1)
+        {
+            // Call original main
+            int (*Window_Main)(HINSTANCE, HINSTANCE, PSTR, int, const char*) = (int (*)(HINSTANCE, HINSTANCE, PSTR, int, const char*))0x0049cd40;
+            Window_Main(hInstance, nullptr, pCmdLine, nCmdShow, "Modded game window");
+        }
+        else if (result != 0)
+        {
+        };
     }
 }
 
