@@ -22,7 +22,7 @@ THISDIR = os.getcwd()
 THISPYTHON = "python" + sys.version[0:4]
 
 SOURCES_LOADER = [os.path.join(THISDIR, "src", "modloader", "modloader.cpp"), os.path.join(THISDIR, "src", "modloader", "md5.c")]
-FLAGS_LOADER = ["-g", "-Wall", "-Wextra", "-pedantic"]
+FLAGS_LOADER = ["-g", "-O0" "-Wall", "-Wextra", "-pedantic"]
 
 SOURCES_IMGUI = [
     "imgui-1.90.5/imgui.cpp",
@@ -53,7 +53,8 @@ FLAGS = [
     "-Wextra",
     "-Wno-unused-parameter",
     "-Wno-unused-variable",
-    "-g"
+    "-g",
+    "-O0"
 ]
 LIBS = [
     "-lgdi32",
