@@ -57,7 +57,11 @@ int g_nCmdShow;
 
 std::vector<ChangeItem> g_changes;
 std::bitset<SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN> collisionsMask;
-const std::string modName("core");
+const char* modName = nullptr; // used for logging by writeBytesChecked
+int modHadCollision = false; // set if transaction failed, to rollback
+
+// forward declaration
+extern "C" bool WriteBytesChecked(unsigned char* at, unsigned char* code, size_t nbBytes);
 
 bool CreateConsoleWindow()
 {
@@ -123,37 +127,61 @@ void WriteBytes(unsigned char* at, unsigned char* code, unsigned char* oldBytes,
     }
 }
 
-bool WriteBytesChecked(std::string modName, unsigned char* at, unsigned char* code, size_t nbBytes)
+void UndoAllWritesForMod(const char* modName)
 {
-    for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
+    DWORD old;
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, PAGE_EXECUTE_READWRITE, &old);
+
+    size_t i = 0;
+    while (g_changes.size() < i)
     {
-        if (collisionsMask.test(i))
+        if (std::strcmp(modName, g_changes[i].modName.c_str()) == 0)
         {
-            printf("WARNING: Detected Write Collision at 0x%08X! Mod %s cannot write at %p!\n", i, modName.c_str(), at);
-            return false;
+            unsigned char* at = g_changes[i].position;
+            unsigned char* oldBytes = g_changes[i].oldBytes.get();
+            size_t nbBytes = sizeof(oldBytes);
+
+            WriteBytes(at, oldBytes, nullptr, nbBytes);
+
+            for (std::size_t j = reinterpret_cast<uintptr_t>(at); j < reinterpret_cast<uintptr_t>(at) + nbBytes; j++)
+            {
+                collisionsMask.reset(j);
+            }
+
+            g_changes.erase(g_changes.begin() + i);
+        }
+        else
+        {
+            i += 1;
         }
     }
 
-    auto oldBytes = std::make_unique<unsigned char[]>(nbBytes);
-
-    WriteBytes(at, code, oldBytes.get(), nbBytes);
-    for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
-    {
-        collisionsMask.set(i);
-    }
-
-    g_changes.emplace_back(ChangeItem{
-        modName,
-        at,
-        std::move(oldBytes),
-    });
-
-    return true;
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, nullptr);
 }
 
-void UndoAllWritesForMod(std::string modName)
+void UndoAllWrites()
 {
-    // TODO
+    DWORD old;
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, PAGE_EXECUTE_READWRITE, &old);
+
+    while (0 < g_changes.size())
+    {
+        size_t last = g_changes.size() - 1;
+        unsigned char* at = g_changes[last].position;
+        unsigned char* oldBytes = g_changes[last].oldBytes.get();
+        size_t nbBytes = sizeof(oldBytes);
+
+        WriteBytes(at, oldBytes, nullptr, nbBytes);
+
+        for (std::size_t j = reinterpret_cast<uintptr_t>(at); j < reinterpret_cast<uintptr_t>(at) + nbBytes; j++)
+        {
+            collisionsMask.reset(j);
+        }
+
+        g_changes.erase(g_changes.end() - 1);
+    }
+
+    VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, old, nullptr);
 }
 
 #define NOP (0x90)
@@ -162,8 +190,8 @@ void patchAssetBuffer()
 {
     unsigned char* ASSETBUFFERMALLOCSIZE_ADDR = (unsigned char*)0x00449042;
     unsigned char* ASSETBUFFERENDOFFSET_ADDR = (unsigned char*)0x0044904d;
-    WriteBytesChecked(modName, ASSETBUFFERMALLOCSIZE_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
-    WriteBytesChecked(modName, ASSETBUFFERENDOFFSET_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
+    WriteBytesChecked(ASSETBUFFERMALLOCSIZE_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
+    WriteBytesChecked(ASSETBUFFERENDOFFSET_ADDR, (unsigned char*)(&g_config.assetBufferByteSize), 4);
 }
 
 void patchWindowFlag()
@@ -172,7 +200,7 @@ void patchWindowFlag()
     if (g_config.changeWindowFlags)
     {
         unsigned char pushNewFlags[] = { 0x68, 0x00, 0x00, 0x04, 0x90 }; // PUSH imm32 WS_SIZEBOX | WS_VISIBLE | WS_POPUP
-        WriteBytesChecked(modName, CHANGEWINDOWFLAG_ADDR, pushNewFlags, sizeof(pushNewFlags));
+        WriteBytesChecked(CHANGEWINDOWFLAG_ADDR, pushNewFlags, sizeof(pushNewFlags));
     }
 }
 
@@ -191,13 +219,13 @@ void patchFOV()
     // MOV ECX, 0x3f800000 // Put back the original value for the rest of the function
     unsigned char cameraFOVPatch[13] = { 0xB9, NOP, NOP, NOP, NOP, 0x89, 0x4E, 0x44, 0xB9, 0x00, 0x00, 0x80, 0x3F };
     memmove(&(cameraFOVPatch[1]), (void*)(&g_config.cameraFOV), 4);
-    WriteBytesChecked(modName, CAMERAFOVCHANGE_ADDR, cameraFOVPatch, sizeof(cameraFOVPatch));
+    WriteBytesChecked(CAMERAFOVCHANGE_ADDR, cameraFOVPatch, sizeof(cameraFOVPatch));
 
     // Need to patch the two rel16 function call. These two writes both do -8 on the relative call
     unsigned char cameraFOVF1 = 0x3e;
-    WriteBytesChecked(modName, CAMERAFOVCHANGEF1_ADDR, &cameraFOVF1, 1);
+    WriteBytesChecked(CAMERAFOVCHANGEF1_ADDR, &cameraFOVF1, 1);
     unsigned char cameraFOVF2 = 0x65;
-    WriteBytesChecked(modName, CAMERAFOVCHANGEF2_ADDR, &cameraFOVF2, 1);
+    WriteBytesChecked(CAMERAFOVCHANGEF2_ADDR, &cameraFOVF2, 1);
 }
 
 void patchSkipRaceCutscene()
@@ -206,7 +234,7 @@ void patchSkipRaceCutscene()
     if (g_config.skipRaceCutscene == false)
         return;
     unsigned char nops[5] = { NOP, NOP, NOP, NOP, NOP };
-    WriteBytesChecked(modName, SKIPRACECUTSCENE_ADDR, nops, sizeof(nops));
+    WriteBytesChecked(SKIPRACECUTSCENE_ADDR, nops, sizeof(nops));
 }
 
 void patchSkipIntroCamera()
@@ -215,7 +243,7 @@ void patchSkipIntroCamera()
         return;
     unsigned char* SKIPINTROCAMERA_ADDR = (unsigned char*)0x0045e2d5;
     float f = 0.0;
-    WriteBytesChecked(modName, SKIPINTROCAMERA_ADDR, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(SKIPINTROCAMERA_ADDR, (unsigned char*)&f, sizeof(float));
 }
 
 void patchUseHighestLOD()
@@ -224,7 +252,7 @@ void patchUseHighestLOD()
         return;
     unsigned char* USEHIGHESTLOD_ADDR = (unsigned char*)0x00431748;
     unsigned char nops[3] = { NOP, NOP, NOP };
-    WriteBytesChecked(modName, USEHIGHESTLOD_ADDR, nops, sizeof(nops));
+    WriteBytesChecked(USEHIGHESTLOD_ADDR, nops, sizeof(nops));
 }
 
 void patchTrimCountdown()
@@ -234,7 +262,7 @@ void patchTrimCountdown()
 
     unsigned char* TRIMCOUNTDOWN_ADDR = (unsigned char*)0x0045e065;
     float f = 1.1;
-    WriteBytesChecked(modName, TRIMCOUNTDOWN_ADDR, (unsigned char*)(&f), sizeof(float));
+    WriteBytesChecked(TRIMCOUNTDOWN_ADDR, (unsigned char*)(&f), sizeof(float));
 }
 
 void patchSkipCantinaScene()
@@ -243,7 +271,7 @@ void patchSkipCantinaScene()
         return;
     unsigned char* SKIPCANTINASCENE_ADDR = (unsigned char*)0x004352ab;
     unsigned char newScene = 0x9;
-    WriteBytesChecked(modName, SKIPCANTINASCENE_ADDR, &newScene, sizeof(unsigned char));
+    WriteBytesChecked(SKIPCANTINASCENE_ADDR, &newScene, sizeof(unsigned char));
 }
 
 void patchFasterLoad()
@@ -253,8 +281,8 @@ void patchFasterLoad()
     unsigned char* FASTERLOAD_ADDR1 = (unsigned char*)0x0045d0db;
     unsigned char* FASTERLOAD_ADDR2 = (unsigned char*)0x00463b87;
     float f = 0.0;
-    WriteBytesChecked(modName, FASTERLOAD_ADDR1, (unsigned char*)&f, sizeof(float));
-    WriteBytesChecked(modName, FASTERLOAD_ADDR2, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(FASTERLOAD_ADDR1, (unsigned char*)&f, sizeof(float));
+    WriteBytesChecked(FASTERLOAD_ADDR2, (unsigned char*)&f, sizeof(float));
 }
 
 int applyPatches()
@@ -264,6 +292,8 @@ int applyPatches()
 
     DWORD old;
     VirtualProtect((void*)SWR_SECTION_TEXT_BEGIN, SWR_SECTION_RSRC_BEGIN - SWR_SECTION_TEXT_BEGIN, PAGE_EXECUTE_READWRITE, &old);
+
+    modName = "core";
 
     patchAssetBuffer();
     // patchWindowFlag(); // TODO: investigate
@@ -457,7 +487,7 @@ void getMods(std::vector<ModItem>& outmods)
         const char* extension = fullnamePath.extension().string().c_str();
         if (std::strcmp(extension, ".dll") == 0)
         {
-            outmods.push_back(ModItem{ fullnamePath, filename, false });
+            outmods.push_back(ModItem{ fullnamePath, filename, true });
         }
         else
         {
@@ -466,42 +496,66 @@ void getMods(std::vector<ModItem>& outmods)
     }
 }
 
-typedef void(__stdcall* mod_initf)(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow);
+typedef void (*modInitf)(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow);
 
 /**
  * @return true on error
  */
-bool runPatching(std::vector<ModItem> mods_items)
+bool runPatching(std::vector<ModItem>& mods_items)
 {
     printf("Running Patching...\n");
 
+    // Clear all previous patches in order not to collide with self
+    UndoAllWrites();
+
+    int hasError = false;
     for (const ModItem& item : mods_items)
     {
         if (item.activated)
         {
+            modName = item.filename.c_str();
+            modHadCollision = false;
+
             HINSTANCE handle = LoadLibraryA(item.path.string().c_str());
             if (!handle)
             {
-                printf("Error: Cannot load %s. Refresh the dll list before patching.\n", item.filename.c_str());
-                return true;
+                printf("Error: Cannot load %s. Refresh the dll list before patching.\n", modName);
+                hasError = true;
+                continue;
             }
 
-            mod_initf mod_init = (mod_initf)GetProcAddress(handle, "init");
-            if (!mod_init)
+            modInitf modInit = (modInitf)GetProcAddress(handle, "init");
+            if (!modInit)
             {
-                printf("Error: Cannot find \"init\" function in the mod %s. Make sure the function symbol is properly exported.\n",
-                       item.filename.c_str());
-                return true;
+                printf("Error: Cannot find \"init\" function in the mod %s. Make sure the function symbol is properly exported.\n", modName);
+                // if (g_config.developperMode)
+                // {
+                LPSTR messageBuffer = nullptr;
+                size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
+                                             GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+                printf("\t%s\n", messageBuffer);
+                // }
+                hasError = true;
+                continue;
             }
 
-            mod_init(g_hInstance, g_hPrevInstance, g_pCmdLine, g_nCmdShow);
-            // check for collision error
-            // undo all patches if any error
+            modInit(g_hInstance, g_hPrevInstance, g_pCmdLine, g_nCmdShow);
 
-            // if any error, terminate early
-            printf("Some error occured when trying to patch \"%s\"\n", item.filename.c_str());
-            return true;
+            // abort transaction for mod that collided
+            if (modHadCollision)
+            {
+                UndoAllWritesForMod(modName);
+                printf("Error: Collision occured when trying to patch \"%s\"\n", item.filename.c_str());
+                hasError = true;
+                continue;
+            }
         }
+    }
+
+    if (hasError)
+    {
+        printf("Patching contains some Errors !\n");
+        return true;
     }
 
     printf("Patching completed successfuly !\n");
@@ -587,9 +641,15 @@ int runGui()
         {
             ImGui_ImplSDL2_ProcessEvent(&event);
             if (event.type == SDL_QUIT)
+            {
+                runGame = false;
                 done = true;
+            }
             if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE && event.window.windowID == SDL_GetWindowID(window))
+            {
+                runGame = false;
                 done = true;
+            }
         }
 
         // Start the Dear ImGui frame
@@ -597,8 +657,10 @@ int runGui()
         ImGui_ImplSDL2_NewFrame();
         ImGui::NewFrame();
 
-        if (show_demo_window)
+        if (g_config.developperMode && show_demo_window)
+        {
             ImGui::ShowDemoWindow(&show_demo_window);
+        }
 
         {
             static float f = 0.0f;
@@ -669,21 +731,24 @@ int runGui()
 
             if (ImGui::Button("Patch and Run game"))
             {
+                runGame = true;
+
                 patchError = runPatching(mods_items);
                 if (!patchError)
                 {
                     done = true;
-                    runGame = true;
-                }
-                else
-                {
-                    printf("TODO, unpatch everything\n");
                 }
             }
 
             if (patchError)
             {
-                ImGui::TextColored(ImVec4(1.0, 0.0, 0.0, 1.0), "Some patch error occured. Check the debug console for more informations.");
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0, 0.0, 0.0, 1.0));
+                ImGui::Text("Some patch error occured. Check the debug console for more informations.");
+                if (ImGui::Button("Run game anyway"))
+                {
+                    runGame = true;
+                }
+                ImGui::PopStyleColor();
             }
 
             ImGui::End();
@@ -724,7 +789,6 @@ extern "C"
         g_pCmdLine = pCmdLine;
         g_nCmdShow = nCmdShow;
 
-        // applyPatches();
         int result = runGui();
         if (result == 1)
         {
@@ -735,6 +799,36 @@ extern "C"
         else if (result != 0)
         {
         };
+    }
+
+    __declspec(dllexport) bool WriteBytesChecked(unsigned char* at, unsigned char* code, size_t nbBytes)
+    {
+        for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
+        {
+            if (collisionsMask.test(i))
+            {
+                printf("WARNING: Detected Write Collision at 0x%08X! Mod %s cannot write at %p!\n", i, modName, at);
+
+                modHadCollision = true;
+                return false;
+            }
+        }
+
+        auto oldBytes = std::make_unique<unsigned char[]>(nbBytes);
+
+        WriteBytes(at, code, oldBytes.get(), nbBytes);
+        for (std::size_t i = reinterpret_cast<uintptr_t>(at); i < reinterpret_cast<uintptr_t>(at) + nbBytes; i++)
+        {
+            collisionsMask.set(i);
+        }
+
+        g_changes.emplace_back(ChangeItem{
+            modName,
+            at,
+            std::move(oldBytes),
+        });
+
+        return true;
     }
 }
 
