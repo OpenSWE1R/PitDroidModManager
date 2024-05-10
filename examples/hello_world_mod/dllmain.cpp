@@ -12,7 +12,7 @@ g++ dllmain.cpp -o hello_world.dll -std=c++20 -g -Wall -Wformat -s -shared
 
 extern "C"
 {
-    __declspec(dllexport) __stdcall void init(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow)
+    __declspec(dllexport) void init(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR pCmdLine, int nCmdShow)
     {
         printf("Hello World mod !\n");
     }
